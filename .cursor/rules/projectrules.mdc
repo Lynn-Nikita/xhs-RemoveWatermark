@@ -1,0 +1,5 @@
+---
+description:这是一个基于uni-app的项目，支持多端开发
+globs:这是前端的项目，除了界面的跳转逻辑，不要写任何后端的处理逻辑，前端只写接口
+alwaysApply: true
+---
