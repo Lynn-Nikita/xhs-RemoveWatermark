@@ -1,0 +1,20 @@
+{
+  "packages": [
+    "nodejs@18",
+    "python@3.11",
+    "go@1.21"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'Setting up development environment...'",
+      "echo 'Node.js version:' && node --version",
+      "echo 'Python version:' && python --version",
+      "echo 'Go version:' && go version",
+      "echo 'Environment ready!'"
+    ]
+  },
+  "env": {
+    "NODE_ENV": "development",
+    "API_PORT": "3000"
+  }
+}

@@ -1,7 +1,7 @@
 {
-    "name" : "",
-    "appid" : "",
-    "description" : "",
+    "name" : "小红书去水印",
+    "appid" : "wx12992bf2fc800535",
+    "description" : "小红书去水印是一个基于小红书平台的去水印工具，它可以帮助用户去除视频中的水印，使视频更清晰、更易观看。",
     "versionName" : "1.0.0",
     "versionCode" : "100",
     "transformPx" : false,
@@ -50,7 +50,7 @@
     "quickapp" : {},
     /* 小程序特有相关 */
     "mp-weixin" : {
-        "appid" : "",
+        "appid" : "wx12992bf2fc800535",
         "setting" : {
             "urlCheck" : false
         },

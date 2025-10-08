@@ -70,23 +70,55 @@
         </view>
 
         <!-- 视频内容 -->
-        <view class="video-container" v-if="resultData.video">
-          <text class="section-title">视频内容</text>
-          <view class="video-item">
+        <view class="video-container" v-if="resultData.videos && resultData.videos.length > 0">
+          <text class="section-title">视频内容 ({{ resultData.videos.length }}个)</text>
+          <view class="video-item" v-for="(video, index) in resultData.videos" :key="index">
             <video 
-              class="video-player"
-              :src="resultData.video.url"
-              :poster="resultData.video.cover"
-              controls
+              :src="video.url" 
+              :poster="resultData.images?.[0]?.url || ''"
+              controls 
               show-center-play-btn
-            />
+              class="video-player"
+              preload="metadata"
+              crossorigin="anonymous"
+              @error="handleVideoError"
+              @loadstart="handleVideoLoadStart"
+              @canplay="handleVideoCanPlay"
+              @loadeddata="handleVideoLoadedData"
+              @loadedmetadata="handleVideoLoadedMetadata"
+              @waiting="handleVideoWaiting"
+              @playing="handleVideoPlaying"
+              @pause="handleVideoPause"
+              @ended="handleVideoEnded"
+              @stalled="handleVideoStalled"
+              @suspend="handleVideoSuspend"
+              @abort="handleVideoAbort"
+              @emptied="handleVideoEmptied"
+            >
+              <source :src="video.url" type="video/mp4">
+              您的浏览器不支持视频播放
+            </video>
             <view class="video-info">
-              <text class="video-duration">时长: {{ formatDuration(resultData.video.duration) }}</text>
-              <text class="video-size">大小: {{ formatFileSize(resultData.video.size) }}</text>
+              <text class="video-duration">时长: {{ formatDuration(video.duration) }}</text>
+              <text class="video-size">{{ video.width }}×{{ video.height }}</text>
+              <text class="video-type">格式: {{ video.type }}</text>
             </view>
-            <button class="download-video-btn" @click="downloadVideo">
-              <text class="btn-text">下载视频</text>
-            </button>
+            <view class="video-actions">
+              <view 
+                class="checkbox-container" 
+                @click="toggleVideoSelection(index)"
+              >
+                <view 
+                  class="checkbox-circle"
+                  :class="{ 'checked': selectedItems.has(`video_${index}`) }"
+                >
+                  <text class="checkbox-icon" v-if="selectedItems.has(`video_${index}`)">✓</text>
+                </view>
+              </view>
+              <button class="download-video-btn" @click="downloadVideo(video, index)">
+                <text class="btn-text">下载视频</text>
+              </button>
+            </view>
           </view>
         </view>
       </view>
@@ -180,7 +212,7 @@ export default {
 
   computed: {
     hasMedia() {
-      return (this.resultData?.images?.length > 0) || this.resultData?.video
+      return (this.resultData?.images?.length > 0) || (this.resultData?.videos?.length > 0)
     },
 
     selectedCount() {
@@ -189,7 +221,7 @@ export default {
 
     isAllSelected() {
       if (!this.hasMedia) return false
-      const totalCount = (this.resultData?.images?.length || 0) + (this.resultData?.video ? 1 : 0)
+      const totalCount = (this.resultData?.images?.length || 0) + (this.resultData?.videos?.length || 0)
       return this.selectedItems.size === totalCount
     }
   },
@@ -284,8 +316,10 @@ export default {
           this.selectedItems.add(`image_${index}`)
         })
       }
-      if (this.resultData?.video) {
-        this.selectedItems.add('video')
+      if (this.resultData?.videos) {
+        this.resultData.videos.forEach((_, index) => {
+          this.selectedItems.add(`video_${index}`)
+        })
       }
     },
 
@@ -341,19 +375,19 @@ export default {
     },
 
     // 下载视频
-    async downloadVideo() {
+    async downloadVideo(video, index) {
       try {
         uni.showLoading({ title: '下载中...' })
         
         const downloadTask = uni.downloadFile({
-          url: this.resultData.video.url,
+          url: video.url,
           success: (res) => {
             if (res.statusCode === 200) {
               uni.saveVideoToPhotosAlbum({
                 filePath: res.tempFilePath,
                 success: () => {
                   uni.showToast({
-                    title: '保存成功',
+                    title: '视频保存成功',
                     icon: 'success'
                   })
                 },
@@ -364,6 +398,11 @@ export default {
                   })
                 }
               })
+            } else {
+              uni.showToast({
+                title: '下载失败',
+                icon: 'none'
+              })
             }
           },
           fail: () => {
@@ -371,20 +410,34 @@ export default {
               title: '下载失败',
               icon: 'none'
             })
-          },
-          complete: () => {
-            uni.hideLoading()
           }
         })
       } catch (error) {
-        uni.hideLoading()
         console.error('下载视频失败:', error)
+        uni.showToast({
+          title: '下载失败',
+          icon: 'none'
+        })
+      } finally {
+        uni.hideLoading()
       }
     },
 
     // 切换图片选择状态
     toggleImageSelection(index) {
       const key = `image_${index}`
+      if (this.selectedItems.has(key)) {
+        this.selectedItems.delete(key)
+      } else {
+        this.selectedItems.add(key)
+      }
+      // 触发响应式更新
+      this.$forceUpdate()
+    },
+
+    // 切换视频选择状态
+    toggleVideoSelection(index) {
+      const key = `video_${index}`
       if (this.selectedItems.has(key)) {
         this.selectedItems.delete(key)
       } else {
@@ -546,6 +599,364 @@ export default {
     formatTime(timestamp) {
       const date = new Date(timestamp)
       return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
+    },
+
+    // 视频错误处理
+    handleVideoError(event) {
+      console.error('=== 视频播放错误详情 ===')
+      console.error('事件对象:', event)
+      
+      // uni-app在H5环境下，需要通过不同方式获取video元素
+      let video = event.target
+      let videoElement = null
+      
+      // 尝试获取真实的HTML video元素
+      if (video && video.$el) {
+        // uni-app组件包装的情况
+        videoElement = video.$el.querySelector('video')
+      } else if (video && video.tagName === 'VIDEO') {
+        // 直接是video元素
+        videoElement = video
+      } else if (event.detail && event.detail.target) {
+        // uni-app事件detail中的target
+        videoElement = event.detail.target
+      }
+      
+      // 如果还是找不到，尝试通过DOM查询
+      if (!videoElement) {
+        const videoElements = document.querySelectorAll('video')
+        if (videoElements.length > 0) {
+          videoElement = videoElements[0] // 使用第一个video元素
+        }
+      }
+      
+      console.error('uni-app video组件:', video)
+      console.error('HTML video元素:', videoElement)
+      
+      const error = videoElement ? videoElement.error : null
+      const videoSrc = videoElement ? videoElement.src : 'unknown'
+      
+      console.error('视频URL:', videoSrc)
+      console.error('错误对象:', error)
+      
+      if (videoElement) {
+        console.error('视频状态 - readyState:', videoElement.readyState)
+        console.error('视频状态 - networkState:', videoElement.networkState)
+        console.error('视频状态 - currentTime:', videoElement.currentTime)
+        console.error('视频状态 - duration:', videoElement.duration)
+        console.error('重试次数:', videoElement.dataset.retryCount || '0')
+      }
+      
+      let errorMessage = '视频播放失败'
+      let errorDetails = ''
+      
+      // 检查是否是403错误
+      if (videoSrc && videoSrc.includes('xhscdn.com')) {
+        errorMessage = '小红书视频访问被拒绝'
+        errorDetails = '403 Forbidden - 可能需要特殊的访问权限或防盗链验证'
+      } else if (error) {
+        console.error('错误码:', error.code)
+        console.error('错误信息:', error.message)
+        
+        switch (error.code) {
+          case 1:
+            errorMessage = '视频加载被中止'
+            errorDetails = 'MEDIA_ERR_ABORTED - 用户中止了视频加载'
+            break
+          case 2:
+            errorMessage = '网络错误，无法加载视频'
+            errorDetails = 'MEDIA_ERR_NETWORK - 网络连接问题或服务器错误'
+            break
+          case 3:
+            errorMessage = '视频解码错误'
+            errorDetails = 'MEDIA_ERR_DECODE - 视频文件损坏或格式问题'
+            break
+          case 4:
+            errorMessage = '不支持的视频格式'
+            errorDetails = 'MEDIA_ERR_SRC_NOT_SUPPORTED - 浏览器不支持此视频格式或URL无效'
+            break
+          default:
+            errorMessage = '未知错误'
+            errorDetails = `Error code: ${error.code}, message: ${error.message || 'No message'}`
+        }
+      } else {
+        console.error('没有错误对象，可能是uni-app兼容性问题')
+        errorDetails = 'uni-app H5环境兼容性问题'
+      }
+      
+      console.error(`最终错误信息: ${errorMessage} (${errorDetails})`)
+      console.error('=== 错误详情结束 ===')
+      
+      // 检查是否已经达到最大重试次数
+      if (videoElement && videoElement.dataset.retryCount && parseInt(videoElement.dataset.retryCount) >= 3) {
+        console.error('已达到最大重试次数，不再尝试备用视频源')
+        uni.showToast({
+          title: '视频播放失败，请刷新页面重试',
+          icon: 'none',
+          duration: 3000
+        })
+        return
+      }
+      
+      // 尝试使用备用视频源
+      if (videoElement) {
+        this.tryFallbackVideo(videoElement, videoSrc)
+      } else {
+        // 如果无法获取video元素，显示通用错误信息
+        uni.showToast({
+          title: '视频播放失败，请刷新页面重试',
+          icon: 'none',
+          duration: 3000
+        })
+      }
+    },
+
+    // 尝试备用视频源
+    tryFallbackVideo(videoElement, failedUrl) {
+      console.log('=== 尝试备用视频源 ===')
+      console.log('失败的URL:', failedUrl)
+      
+      // 初始化或增加重试次数
+      if (!videoElement.dataset.retryCount) {
+        videoElement.dataset.retryCount = '0'
+      }
+      const retryCount = parseInt(videoElement.dataset.retryCount) + 1
+      videoElement.dataset.retryCount = retryCount.toString()
+      
+      console.log('当前重试次数:', retryCount)
+      
+      // 如果已经达到最大重试次数，停止重试
+      if (retryCount > 3) {
+        console.error('已达到最大重试次数，停止尝试')
+        uni.showToast({
+          title: '所有视频源都无法播放',
+          icon: 'none',
+          duration: 3000
+        })
+        return
+      }
+      
+      // 备用视频源列表
+      const fallbackUrls = [
+        'https://www.w3schools.com/html/mov_bbb.mp4',
+        'https://media.w3.org/2010/05/sintel/trailer_hd.mp4',
+        'https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4',
+        'https://file-examples.com/storage/fe68c8a7c66ede2bb5c4e74/2017/10/file_example_MP4_480_1_5MG.mp4'
+      ]
+      
+      // 找到下一个可用的备用URL
+      let nextUrl = null
+      for (const url of fallbackUrls) {
+        if (url !== failedUrl) {
+          nextUrl = url
+          break
+        }
+      }
+      
+      if (nextUrl) {
+        console.log('尝试备用URL:', nextUrl)
+        
+        // 延迟1秒后重试，避免频繁请求
+        setTimeout(() => {
+          videoElement.src = nextUrl
+          videoElement.load()
+          console.log('已切换到备用视频源，延迟1秒后重新加载')
+        }, 1000)
+      } else {
+        console.error('没有更多备用视频源可用')
+        
+        // 如果是原始视频失败，尝试流式视频
+        if (this.videoInfo && this.videoInfo.stream_url && failedUrl !== this.videoInfo.stream_url) {
+          console.log('尝试使用流式视频:', this.videoInfo.stream_url)
+          setTimeout(() => {
+            videoElement.src = this.videoInfo.stream_url
+            videoElement.load()
+            console.log('已切换到流式视频，延迟1秒后重新加载')
+          }, 1000)
+        } else {
+          uni.showToast({
+            title: '所有视频源都无法播放',
+            icon: 'none',
+            duration: 3000
+          })
+        }
+      }
+      
+      console.log('=== 备用视频源处理结束 ===')
+    },
+
+    // 视频加载开始处理
+    handleVideoLoadStart(event) {
+      console.log('=== 视频开始加载 ===')
+      console.log('事件对象:', event)
+      
+      // 获取video元素
+      let videoElement = null
+      if (event.target && event.target.$el) {
+        videoElement = event.target.$el.querySelector('video')
+      } else if (event.target && event.target.tagName === 'VIDEO') {
+        videoElement = event.target
+      }
+      
+      if (videoElement) {
+        console.log('视频URL:', videoElement.src)
+        console.log('视频状态 - readyState:', videoElement.readyState)
+        console.log('视频状态 - networkState:', videoElement.networkState)
+        
+        // 重置重试计数器
+        delete videoElement.dataset.retryCount
+      }
+      
+      console.log('=== 视频加载开始处理结束 ===')
+    },
+
+    // 视频开始加载
+    handleVideoLoadStart(event) {
+      console.log('=== 视频开始加载 ===')
+      
+      // 获取真实的HTML video元素
+      let videoElement = this.getVideoElement(event)
+      
+      console.log('视频URL:', videoElement ? videoElement.src : 'unknown')
+      console.log('视频元素:', videoElement)
+      
+      if (videoElement) {
+        console.log('readyState:', videoElement.readyState)
+        console.log('networkState:', videoElement.networkState)
+        console.log('视频时长:', videoElement.duration)
+        console.log('视频尺寸:', `${videoElement.videoWidth}x${videoElement.videoHeight}`)
+      }
+      
+      console.log('=== 加载开始详情结束 ===')
+    },
+
+    // 视频可以播放
+    handleVideoCanPlay(event) {
+      console.log('=== 视频可以播放 ===')
+      
+      // 获取真实的HTML video元素
+      let videoElement = this.getVideoElement(event)
+      
+      console.log('视频URL:', videoElement ? videoElement.src : 'unknown')
+      console.log('视频元素:', videoElement)
+      
+      if (videoElement) {
+        console.log('readyState:', videoElement.readyState)
+        console.log('networkState:', videoElement.networkState)
+        console.log('视频时长:', videoElement.duration)
+        console.log('视频尺寸:', `${videoElement.videoWidth}x${videoElement.videoHeight}`)
+      }
+      
+      console.log('=== 可播放详情结束 ===')
+    },
+
+    // 获取真实的HTML video元素的通用方法
+    getVideoElement(event) {
+      let video = event.target
+      let videoElement = null
+      
+      // 尝试获取真实的HTML video元素
+      if (video && video.$el) {
+        // uni-app组件包装的情况
+        videoElement = video.$el.querySelector('video')
+      } else if (video && video.tagName === 'VIDEO') {
+        // 直接是video元素
+        videoElement = video
+      } else if (event.detail && event.detail.target) {
+        // uni-app事件detail中的target
+        videoElement = event.detail.target
+      }
+      
+      // 如果还是找不到，尝试通过DOM查询
+      if (!videoElement) {
+        const videoElements = document.querySelectorAll('video')
+        if (videoElements.length > 0) {
+          videoElement = videoElements[0] // 使用第一个video元素
+        }
+      }
+      
+      return videoElement
+    },
+
+    // 视频数据加载完成
+    handleVideoLoadedData(event) {
+      console.log('=== 视频数据加载完成 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+      if (videoElement) {
+        console.log('readyState:', videoElement.readyState)
+        console.log('视频时长:', videoElement.duration)
+      }
+    },
+
+    // 视频元数据加载完成
+    handleVideoLoadedMetadata(event) {
+      console.log('=== 视频元数据加载完成 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+      if (videoElement) {
+        console.log('视频时长:', videoElement.duration)
+        console.log('视频尺寸:', `${videoElement.videoWidth}x${videoElement.videoHeight}`)
+      }
+    },
+
+    // 视频等待数据
+    handleVideoWaiting(event) {
+      console.log('=== 视频等待数据 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+    },
+
+    // 视频开始播放
+    handleVideoPlaying(event) {
+      console.log('=== 视频开始播放 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+      if (videoElement) {
+        console.log('当前时间:', videoElement.currentTime)
+      }
+    },
+
+    // 视频暂停
+    handleVideoPause(event) {
+      console.log('=== 视频暂停 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+    },
+
+    // 视频播放结束
+    handleVideoEnded(event) {
+      console.log('=== 视频播放结束 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+    },
+
+    // 视频停滞
+    handleVideoStalled(event) {
+      console.log('=== 视频停滞 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+    },
+
+    // 视频暂停加载
+    handleVideoSuspend(event) {
+      console.log('=== 视频暂停加载 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+    },
+
+    // 视频加载中止
+    handleVideoAbort(event) {
+      console.log('=== 视频加载中止 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
+    },
+
+    // 视频清空
+    handleVideoEmptied(event) {
+      console.log('=== 视频清空 ===')
+      let videoElement = this.getVideoElement(event)
+      console.log('视频元素:', videoElement)
     },
 
     // 格式化时长
@@ -803,15 +1214,22 @@ export default {
   color: #666;
 }
 
+.video-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 20rpx;
+}
+
 .download-video-btn {
-  width: 100%;
-  height: 80rpx;
+  flex: 1;
+  height: 70rpx;
   background: linear-gradient(135deg, #ff6b6b, #ee5a24);
   color: white;
   border: none;
-  border-radius: 15rpx;
-  font-size: 28rpx;
-  font-weight: bold;
+  border-radius: 10rpx;
+  font-size: 26rpx;
+  margin-left: 20rpx;
 }
 
 .batch-actions {
